@@ -271,7 +271,7 @@ async function getAssistantResponse(history, message) {
     ];
 
     const response = await openai.createChatCompletion({
-      model: "gpt-4", // แก้ไขเป็น "gpt-4"
+      model: "gpt-4o", // แก้ไขเป็น "gpt-4"
       messages: messages,
     });
 
