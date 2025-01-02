@@ -269,7 +269,7 @@ async function getAssistantResponse(history, message) {
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-o1-mini", // หรือ gpt-3.5-turbo ฯลฯ
+      model: "o1-mini", // หรือ gpt-3.5-turbo ฯลฯ
       messages: messages,
     });
     return response.choices[0].message.content;
