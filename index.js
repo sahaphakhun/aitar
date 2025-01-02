@@ -270,7 +270,7 @@ async function getAssistantResponse(history, message) {
     ];
 
     const response = await openai.chat.completions.create({
-      model: "o1-mini",
+      model: "gpt-4o",
       messages: messages,
     });
     return response.choices[0].message.content;
