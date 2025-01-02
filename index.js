@@ -3,7 +3,7 @@
 // ------------------------
 const express = require('express');
 const bodyParser = require('body-parser');
-const axios = require('axios');  // เปลี่ยนจาก request เป็น axios
+const request = require('request');
 const { OpenAI } = require('openai');
 const { MongoClient } = require('mongodb');
 
@@ -41,7 +41,6 @@ app.use(bodyParser.json());
 
 // ------------------------
 // System Instructions (แก้ไขให้พร้อมใช้งานกับแอปริคอตแห้ง)
-// ------------------------
 const systemInstructions = `
 สวมบทบาทเป็นแอดมินสำหรับตอบคำถามและขายสินค้าในเพจ Facebook  
 โปรดใช้ภาษาที่สุภาพ หลีกเลี่ยงการตอบข้อความยาว ๆ หรือข้อความซ้ำซ้อนน่าเบื่อ ให้เจาะจงตอบเฉพาะที่ลูกค้าถาม
@@ -64,7 +63,7 @@ const systemInstructions = `
 
 ### การตอบคำถาม
 - **ห้ามตอบนอกเหนือคำถามที่ลูกค้าถาม**
-  - ตัวอย่าง: ถ้าลูกค้าถามว่า “ใช้เวลาติดตั้งนานไหมครับ” ควรตอบเฉพาะเรื่องนั้น ไม่ต้องกล่าวถึงความสามารถของ AI
+  - ตัวอย่าง: ถ้าลูกค้าสอบถามว่า “ใช้เวลาติดตั้งนานไหมครับ” ควรตอบเฉพาะเรื่องนั้น ไม่ต้องกล่าวถึงความสามารถของ AI
 - **เน้นตอบประเด็นที่ลูกค้าถาม**
   - ตอบให้ **สั้น กระชับ**
   - ไม่ต้องตอบเพิ่มเติมนอกจากคำถามที่พึ่งถามมา ยกเว้นลูกค้าสอบถามรายละเอียดเพิ่มเติม
@@ -213,10 +212,7 @@ app.post('/webhook', async (req, res) => {
         const messageText = webhookEvent.message.text;
         const history = await getChatHistory(senderId);
         const assistantResponse = await getAssistantResponse(history, messageText);
-
-        // บันทึกประวัติ (user & assistant)
         await saveChatHistory(senderId, messageText, assistantResponse);
-
         sendTextMessage(senderId, assistantResponse);
       }
       else if (webhookEvent.message && webhookEvent.message.attachments) {
@@ -227,19 +223,13 @@ app.post('/webhook', async (req, res) => {
           const userMessage = "**ลูกค้าส่งรูปมา**";
           const history = await getChatHistory(senderId);
           const assistantResponse = await getAssistantResponse(history, userMessage);
-
-          // บันทึกประวัติ (user & assistant)
           await saveChatHistory(senderId, userMessage, assistantResponse);
-
           sendTextMessage(senderId, assistantResponse);
         } else {
           const userMessage = "**ลูกค้าส่งไฟล์แนบที่ไม่ใช่รูป**";
           const history = await getChatHistory(senderId);
           const assistantResponse = await getAssistantResponse(history, userMessage);
-
-          // บันทึกประวัติ (user & assistant)
           await saveChatHistory(senderId, userMessage, assistantResponse);
-
           sendTextMessage(senderId, assistantResponse);
         }
       }
@@ -251,6 +241,18 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ------------------------
+// ฟังก์ชัน: เชื่อมต่อ MongoDB (Global client)
+// ------------------------
+async function connectDB() {
+  if (!mongoClient) {
+    mongoClient = new MongoClient(MONGO_URI);
+    await mongoClient.connect();
+    console.log("MongoDB connected (global client).");
+  }
+  return mongoClient;
+}
+
+// ------------------------
 // ฟังก์ชัน: getChatHistory
 // ------------------------
 async function getChatHistory(senderId) {
@@ -259,16 +261,10 @@ async function getChatHistory(senderId) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    // ดึงข้อมูลเรียงตามเวลาที่บันทึก
-    const chats = await collection
-      .find({ senderId })
-      .sort({ timestamp: 1 })
-      .toArray();
-
-    // แปลงเป็นรูปแบบ { role, content }
+    const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).toArray();
     return chats.map(chat => ({
-      role: chat.role,
-      content: chat.content,
+      role: chat.role,       // ใช้ role จากฐานข้อมูล
+      content: chat.content, // ใช้ content จากฐานข้อมูล
     }));
   } catch (error) {
     console.error("Error fetching chat history:", error);
@@ -288,7 +284,7 @@ async function getAssistantResponse(history, message) {
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // คงชื่อโมเดลตามเดิม
+      model: "gpt-4o", // หรือ gpt-3.5-turbo ฯลฯ
       messages: messages,
     });
     return response.choices[0].message.content;
@@ -299,7 +295,7 @@ async function getAssistantResponse(history, message) {
 }
 
 // ------------------------
-// ฟังก์ชัน: saveChatHistory (บันทึกทั้ง user และ assistant)
+// ฟังก์ชัน: saveChatHistory
 // ------------------------
 async function saveChatHistory(senderId, userMessage, assistantResponse) {
   try {
@@ -307,21 +303,25 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    // เก็บเป็น 2 record
-    const chatRecordUser = {
+    const userChatRecord = {
       senderId,
-      role: 'user',
+      role: "user",
       content: userMessage,
       timestamp: new Date(),
     };
-    const chatRecordAssistant = {
+
+    const assistantChatRecord = {
       senderId,
-      role: 'assistant',
+      role: "assistant",
       content: assistantResponse,
       timestamp: new Date(),
     };
 
-    await collection.insertMany([chatRecordUser, chatRecordAssistant]);
+    // บันทึกข้อความของผู้ใช้
+    await collection.insertOne(userChatRecord);
+    // บันทึกข้อความของผู้ช่วย
+    await collection.insertOne(assistantChatRecord);
+
     console.log("บันทึกประวัติการแชทสำเร็จ");
   } catch (error) {
     console.error("Error saving chat history:", error);
@@ -346,7 +346,7 @@ function sendTextMessage(senderId, response) {
     .replace(paymentRegex, '')
     .trim();
 
-  // ส่งข้อความปกติ (text)
+  // ส่งข้อความปกติ
   if (textPart.length > 0) {
     sendSimpleTextMessage(senderId, textPart);
   }
@@ -373,18 +373,18 @@ function sendSimpleTextMessage(senderId, text) {
     message: { text },
   };
 
-  // เปลี่ยน request → axios
-  axios.post(
-    'https://graph.facebook.com/v12.0/me/messages',
-    requestBody,
-    { params: { access_token: PAGE_ACCESS_TOKEN } }
-  )
-    .then(() => {
+  request({
+    uri: 'https://graph.facebook.com/v12.0/me/messages',
+    qs: { access_token: PAGE_ACCESS_TOKEN },
+    method: 'POST',
+    json: requestBody,
+  }, (err) => {
+    if (!err) {
       console.log('ข้อความถูกส่งสำเร็จ!');
-    })
-    .catch(err => {
+    } else {
       console.error('ไม่สามารถส่งข้อความ:', err);
-    });
+    }
+  });
 }
 
 // ------------------------
@@ -404,18 +404,18 @@ function sendImageMessage(senderId, imageUrl) {
     },
   };
 
-  // เปลี่ยน request → axios
-  axios.post(
-    'https://graph.facebook.com/v12.0/me/messages',
-    requestBody,
-    { params: { access_token: PAGE_ACCESS_TOKEN } }
-  )
-    .then(() => {
+  request({
+    uri: 'https://graph.facebook.com/v12.0/me/messages',
+    qs: { access_token: PAGE_ACCESS_TOKEN },
+    method: 'POST',
+    json: requestBody,
+  }, (err) => {
+    if (!err) {
       console.log('รูปภาพถูกส่งสำเร็จ!');
-    })
-    .catch(err => {
+    } else {
       console.error('ไม่สามารถส่งรูปภาพ:', err);
-    });
+    }
+  });
 }
 
 // ------------------------
