@@ -1,10 +1,12 @@
 // ------------------------
 // server.js
 // ------------------------
+require('dotenv').config(); // โหลดตัวแปร environment
+
 const express = require('express');
 const bodyParser = require('body-parser');
-const request = require('request');
-const { OpenAI } = require('openai');
+const axios = require('axios'); // ใช้ axios แทน request
+const { Configuration, OpenAIApi } = require('openai');
 const { MongoClient } = require('mongodb');
 
 // สร้าง Express App
@@ -18,13 +20,13 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 
 // สร้าง OpenAI Instance
-const openai = new OpenAI({
+const configuration = new Configuration({
   apiKey: OPENAI_API_KEY, // ใช้ API key จาก Environment Variable
 });
+const openai = new OpenAIApi(configuration);
 
 /*
-  แทนที่จะเปิด-ปิด MongoDB Client ในทุกฟังก์ชัน
-  เราจะใช้ global client ตัวเดียว
+  ใช้ global client ตัวเดียวสำหรับ MongoDB
 */
 let mongoClient = null;
 async function connectDB() {
@@ -95,9 +97,92 @@ const systemInstructions = `
 ────────────────────────────────────────
 2) รายละเอียดสินค้า
 ────────────────────────────────────────
-... (ต่อไปตามที่คุณมี)
-`;
+1. บริการติดตั้ง AI ChatGPT
 
+   รายละเอียดการบริการ:
+   - AI ตอบแชทตลอด 24 ชั่วโมง ลดภาระงานแอดมิน
+   - ช่วยปิดการขาย (เจรจา + แนะนำจ่าย)
+   - รองรับการเชื่อมต่อกับ Facebook และสามารถส่งรูป/วิดีโอได้
+   - อัปเดตสม่ำเสมอ และสามารถกำหนดบุคลิก AI ได้ตามต้องการ
+
+   ค่าบริการ:
+   - ค่าบริการรายเดือน: 2,900 บาท/เพจ (จ่ายครั้งแรกพร้อมค่าติดตั้ง)
+   - ค่าติดตั้งครั้งแรก (โปรโมชัน): 6,000 บาท (ลดจาก 9,000 บาท)
+
+   ข้อดี:
+   - ลดค่าใช้จ่ายในการจ้างพนักงาน
+   - ตอบสนองลูกค้าได้รวดเร็วและเพิ่มความพึงพอใจ
+   - ทำงานตลอด 24 ชั่วโมง ปิดการขายได้ดีขึ้น
+
+   ปัญหาและแนวทางแก้ไข:
+   - ปัญหา: ต้องเทรนข้อมูล และยังต้องมีแอดมินสำหรับเคสพิเศษ
+   - แนวทางแก้ไข: จัดเตรียมข้อมูลที่ครบถ้วนและมีแอดมินสำรองสำหรับกรณีที่ AI ไม่สามารถตอบสนองได้
+
+2. คำแนะนำบริการและขั้นตอนการติดตั้ง
+
+   ข้อดีของบริการ:
+   - AI ทำงาน 24 ชม. ไม่มีวันหยุด เพิ่มความสามารถในการตอบสนองลูกค้าอย่างต่อเนื่อง
+   - ลดการจ้างคน ประหยัดต้นทุนและเพิ่มประสิทธิภาพการทำงาน
+   - ตอบสนองลูกค้าได้ไวขึ้น เพิ่มความพึงพอใจและโอกาสในการปิดการขาย
+
+   ขั้นตอนการติดตั้ง:
+   1. วิเคราะห์ธุรกิจ: ทำความเข้าใจความต้องการและลักษณะธุรกิจของลูกค้า
+   2. เชื่อมต่อ API: ติดตั้งและเชื่อมต่อระบบ AI กับแพลตฟอร์มที่ใช้
+   3. เทรนข้อมูล: ป้อนข้อมูลและปรับแต่ง AI ให้เหมาะสมกับการตอบสนอง
+   4. ทดลองและปรับปรุง: ทดสอบการทำงานของ AI และทำการปรับแก้ตามผลลัพธ์
+   5. เปิดใช้งาน: เริ่มใช้งานจริงและติดตามผลการทำงาน
+
+3. ความสามารถของ AI ChatGPT และกลุ่มเป้าหมาย
+
+   ความสามารถของ AI ChatGPT:
+   - ตอบสนองได้รวดเร็วและครบถ้วน
+   - ปิดการขายผ่านการเจรจาและการชำระเงิน
+   - จัดการคำถามซ้ำ ๆ ได้อย่างมีประสิทธิภาพ
+   - รองรับข้อความปริมาณมาก
+   - สามารถส่งรูปและวิดีโอได้
+   - สามารถกำหนดบุคลิก AI ตามต้องการ
+   - อัปเดตความสามารถอย่างสม่ำเสมอ
+
+   กลุ่มเป้าหมาย:
+   - ธุรกิจที่มีคำถามซ้ำ ๆ จากลูกค้า
+   - เจ้าของเพจที่ต้องการลดภาระงานแอดมิน
+   - ธุรกิจที่ต้องการเพิ่มยอดขายผ่านการตอบสนองที่รวดเร็วและมีประสิทธิภาพ
+
+4. ตัวเลือกโมเดล AI ChatGPT
+
+   ประเภทของโมเดล:
+   1. GPT-4o mini
+      - ข้อดี: งบประมาณจำกัด เหมาะกับเคสพื้นฐาน
+      - ข้อเสีย: ความสามารถจำกัดเมื่อเทียบกับรุ่นอื่น
+
+   2. GPT-4o
+      - ข้อดี: สมดุลระหว่างราคาและคุณภาพ
+      - ข้อเสีย: อาจมีค่าใช้จ่ายที่สูงขึ้นหากใช้งานมาก
+
+   3. GPT-o1 mini
+      - ข้อดี: เหมาะกับการเข้าใจภาพและตรรกะที่สูงขึ้น
+      - ข้อเสีย: อาจมีค่าใช้จ่ายสูงกว่า mini รุ่นอื่น
+
+   4. GPT-o1
+      - ข้อดี: มีความสามารถสูงสุด
+      - ข้อเสีย: ราคาสูงกว่าโมเดลอื่น และอาจเกินความจำเป็นสำหรับบางธุรกิจ
+
+   ข้อดีทั่วไปของการใช้ AI ChatGPT:
+   - ลดค่าใช้จ่ายในการดำเนินงาน
+   - ตอบสนองลูกค้าได้รวดเร็วและมีประสิทธิภาพ
+   - ทำงานได้ตลอด 24 ชั่วโมง
+   - ปิดการขายได้ดีขึ้น
+
+   ข้อเสียและแนวทางแก้ไข:
+   - ข้อเสีย: ต้องมีการตั้งค่าและเทรนระบบในช่วงแรก และค่าใช้จ่ายจะเพิ่มตามปริมาณแชท
+   - แนวทางแก้ไข: วางแผนการตั้งค่าและเทรนระบบอย่างเป็นขั้นเป็นตอน พร้อมเตรียมงบประมาณที่เหมาะสม
+
+────────────────────────────────────────
+3) สนใจติดตั้ง
+────────────────────────────────────────
+- แจ้งเบอร์โทร จะมีแอดมินติดต่อกลับไป
+────────────────────────────────────────
+`;
 
 // ------------------------
 // Facebook Webhook Verify
@@ -120,28 +205,27 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   if (req.body.object === 'page') {
     for (const entry of req.body.entry) {
-      const webhookEvent = entry.messaging[0];
-      const senderId = webhookEvent.sender.id;
+      for (const webhookEvent of entry.messaging) { // ประมวลผลทุกข้อความ
+        const senderId = webhookEvent.sender.id;
 
-      if (webhookEvent.message && webhookEvent.message.text) {
-        const messageText = webhookEvent.message.text;
-        const history = await getChatHistory(senderId);
-        const assistantResponse = await getAssistantResponse(history, messageText);
-        await saveChatHistory(senderId, messageText, assistantResponse);
-        sendTextMessage(senderId, assistantResponse);
-      }
-      else if (webhookEvent.message && webhookEvent.message.attachments) {
-        const attachments = webhookEvent.message.attachments;
-        const isImageFound = attachments.some(att => att.type === 'image');
-
-        if (isImageFound) {
-          const userMessage = "**ลูกค้าส่งรูปมา**";
+        if (webhookEvent.message && webhookEvent.message.text) {
+          const messageText = webhookEvent.message.text;
           const history = await getChatHistory(senderId);
-          const assistantResponse = await getAssistantResponse(history, userMessage);
-          await saveChatHistory(senderId, userMessage, assistantResponse);
+          const assistantResponse = await getAssistantResponse(history, messageText);
+          await saveChatHistory(senderId, messageText, assistantResponse);
           sendTextMessage(senderId, assistantResponse);
-        } else {
-          const userMessage = "**ลูกค้าส่งไฟล์แนบที่ไม่ใช่รูป**";
+        }
+        else if (webhookEvent.message && webhookEvent.message.attachments) {
+          const attachments = webhookEvent.message.attachments;
+          const isImageFound = attachments.some(att => att.type === 'image');
+
+          let userMessage;
+          if (isImageFound) {
+            userMessage = "**ลูกค้าส่งรูปมา**";
+          } else {
+            userMessage = "**ลูกค้าส่งไฟล์แนบที่ไม่ใช่รูป**";
+          }
+
           const history = await getChatHistory(senderId);
           const assistantResponse = await getAssistantResponse(history, userMessage);
           await saveChatHistory(senderId, userMessage, assistantResponse);
@@ -156,18 +240,6 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ------------------------
-// ฟังก์ชัน: เชื่อมต่อ MongoDB (Global client)
-// ------------------------
-async function connectDB() {
-  if (!mongoClient) {
-    mongoClient = new MongoClient(MONGO_URI);
-    await mongoClient.connect();
-    console.log("MongoDB connected (global client).");
-  }
-  return mongoClient;
-}
-
-// ------------------------
 // ฟังก์ชัน: getChatHistory
 // ------------------------
 async function getChatHistory(senderId) {
@@ -176,9 +248,9 @@ async function getChatHistory(senderId) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    const chats = await collection.find({ senderId }).toArray();
+    const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).toArray();
     return chats.map(chat => ({
-      role: "user",
+      role: chat.role, // 'user' หรือ 'assistant'
       content: chat.message,
     }));
   } catch (error) {
@@ -198,11 +270,12 @@ async function getAssistantResponse(history, message) {
       { role: "user", content: message },
     ];
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o", // หรือ gpt-3.5-turbo ฯลฯ
+    const response = await openai.createChatCompletion({
+      model: "gpt-4", // แก้ไขเป็น "gpt-4"
       messages: messages,
     });
-    return response.choices[0].message.content;
+
+    return response.data.choices[0].message.content;
   } catch (error) {
     console.error("Error with ChatGPT Assistant:", error);
     return "เกิดข้อผิดพลาดในการเชื่อมต่อกับ Assistant";
@@ -212,19 +285,25 @@ async function getAssistantResponse(history, message) {
 // ------------------------
 // ฟังก์ชัน: saveChatHistory
 // ------------------------
-async function saveChatHistory(senderId, message, response) {
+async function saveChatHistory(senderId, userMessage, assistantResponse) {
   try {
     const client = await connectDB();
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    const chatRecord = {
+    const userRecord = {
       senderId,
-      message,
-      response,
+      role: "user",
+      message: userMessage,
       timestamp: new Date(),
     };
-    await collection.insertOne(chatRecord);
+    const assistantRecord = {
+      senderId,
+      role: "assistant",
+      message: assistantResponse,
+      timestamp: new Date(),
+    };
+    await collection.insertMany([userRecord, assistantRecord]);
     console.log("บันทึกประวัติการแชทสำเร็จ");
   } catch (error) {
     console.error("Error saving chat history:", error);
@@ -270,30 +349,24 @@ function sendTextMessage(senderId, response) {
 // ------------------------
 // ฟังก์ชัน: sendSimpleTextMessage
 // ------------------------
-function sendSimpleTextMessage(senderId, text) {
+async function sendSimpleTextMessage(senderId, text) {
   const requestBody = {
     recipient: { id: senderId },
     message: { text },
   };
 
-  request({
-    uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
-    method: 'POST',
-    json: requestBody,
-  }, (err) => {
-    if (!err) {
-      console.log('ข้อความถูกส่งสำเร็จ!');
-    } else {
-      console.error('ไม่สามารถส่งข้อความ:', err);
-    }
-  });
+  try {
+    await axios.post(`https://graph.facebook.com/v12.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, requestBody);
+    console.log('ข้อความถูกส่งสำเร็จ!');
+  } catch (err) {
+    console.error('ไม่สามารถส่งข้อความ:', err);
+  }
 }
 
 // ------------------------
 // ฟังก์ชัน: sendImageMessage
 // ------------------------
-function sendImageMessage(senderId, imageUrl) {
+async function sendImageMessage(senderId, imageUrl) {
   const requestBody = {
     recipient: { id: senderId },
     message: {
@@ -307,18 +380,12 @@ function sendImageMessage(senderId, imageUrl) {
     },
   };
 
-  request({
-    uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
-    method: 'POST',
-    json: requestBody,
-  }, (err) => {
-    if (!err) {
-      console.log('รูปภาพถูกส่งสำเร็จ!');
-    } else {
-      console.error('ไม่สามารถส่งรูปภาพ:', err);
-    }
-  });
+  try {
+    await axios.post(`https://graph.facebook.com/v12.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, requestBody);
+    console.log('รูปภาพถูกส่งสำเร็จ!');
+  } catch (err) {
+    console.error('ไม่สามารถส่งรูปภาพ:', err);
+  }
 }
 
 // ------------------------
