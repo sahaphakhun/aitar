@@ -3,7 +3,7 @@
 // ------------------------
 const express = require('express');
 const bodyParser = require('body-parser');
-const request = require('request');
+const axios = require('axios');  // เปลี่ยนจาก request เป็น axios
 const { OpenAI } = require('openai');
 const { MongoClient } = require('mongodb');
 
@@ -213,7 +213,10 @@ app.post('/webhook', async (req, res) => {
         const messageText = webhookEvent.message.text;
         const history = await getChatHistory(senderId);
         const assistantResponse = await getAssistantResponse(history, messageText);
+
+        // บันทึกประวัติ (user & assistant)
         await saveChatHistory(senderId, messageText, assistantResponse);
+
         sendTextMessage(senderId, assistantResponse);
       }
       else if (webhookEvent.message && webhookEvent.message.attachments) {
@@ -224,13 +227,19 @@ app.post('/webhook', async (req, res) => {
           const userMessage = "**ลูกค้าส่งรูปมา**";
           const history = await getChatHistory(senderId);
           const assistantResponse = await getAssistantResponse(history, userMessage);
+
+          // บันทึกประวัติ (user & assistant)
           await saveChatHistory(senderId, userMessage, assistantResponse);
+
           sendTextMessage(senderId, assistantResponse);
         } else {
           const userMessage = "**ลูกค้าส่งไฟล์แนบที่ไม่ใช่รูป**";
           const history = await getChatHistory(senderId);
           const assistantResponse = await getAssistantResponse(history, userMessage);
+
+          // บันทึกประวัติ (user & assistant)
           await saveChatHistory(senderId, userMessage, assistantResponse);
+
           sendTextMessage(senderId, assistantResponse);
         }
       }
@@ -242,18 +251,6 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ------------------------
-// ฟังก์ชัน: เชื่อมต่อ MongoDB (Global client)
-// ------------------------
-async function connectDB() {
-  if (!mongoClient) {
-    mongoClient = new MongoClient(MONGO_URI);
-    await mongoClient.connect();
-    console.log("MongoDB connected (global client).");
-  }
-  return mongoClient;
-}
-
-// ------------------------
 // ฟังก์ชัน: getChatHistory
 // ------------------------
 async function getChatHistory(senderId) {
@@ -262,10 +259,16 @@ async function getChatHistory(senderId) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    const chats = await collection.find({ senderId }).toArray();
+    // ดึงข้อมูลเรียงตามเวลาที่บันทึก
+    const chats = await collection
+      .find({ senderId })
+      .sort({ timestamp: 1 })
+      .toArray();
+
+    // แปลงเป็นรูปแบบ { role, content }
     return chats.map(chat => ({
-      role: "user",
-      content: chat.message,
+      role: chat.role,
+      content: chat.content,
     }));
   } catch (error) {
     console.error("Error fetching chat history:", error);
@@ -285,7 +288,7 @@ async function getAssistantResponse(history, message) {
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // หรือ gpt-3.5-turbo ฯลฯ
+      model: "gpt-4o", // คงชื่อโมเดลตามเดิม
       messages: messages,
     });
     return response.choices[0].message.content;
@@ -296,21 +299,29 @@ async function getAssistantResponse(history, message) {
 }
 
 // ------------------------
-// ฟังก์ชัน: saveChatHistory
+// ฟังก์ชัน: saveChatHistory (บันทึกทั้ง user และ assistant)
 // ------------------------
-async function saveChatHistory(senderId, message, response) {
+async function saveChatHistory(senderId, userMessage, assistantResponse) {
   try {
     const client = await connectDB();
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    const chatRecord = {
+    // เก็บเป็น 2 record
+    const chatRecordUser = {
       senderId,
-      message,
-      response,
+      role: 'user',
+      content: userMessage,
       timestamp: new Date(),
     };
-    await collection.insertOne(chatRecord);
+    const chatRecordAssistant = {
+      senderId,
+      role: 'assistant',
+      content: assistantResponse,
+      timestamp: new Date(),
+    };
+
+    await collection.insertMany([chatRecordUser, chatRecordAssistant]);
     console.log("บันทึกประวัติการแชทสำเร็จ");
   } catch (error) {
     console.error("Error saving chat history:", error);
@@ -335,7 +346,7 @@ function sendTextMessage(senderId, response) {
     .replace(paymentRegex, '')
     .trim();
 
-  // ส่งข้อความปกติ
+  // ส่งข้อความปกติ (text)
   if (textPart.length > 0) {
     sendSimpleTextMessage(senderId, textPart);
   }
@@ -362,18 +373,18 @@ function sendSimpleTextMessage(senderId, text) {
     message: { text },
   };
 
-  request({
-    uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
-    method: 'POST',
-    json: requestBody,
-  }, (err) => {
-    if (!err) {
+  // เปลี่ยน request → axios
+  axios.post(
+    'https://graph.facebook.com/v12.0/me/messages',
+    requestBody,
+    { params: { access_token: PAGE_ACCESS_TOKEN } }
+  )
+    .then(() => {
       console.log('ข้อความถูกส่งสำเร็จ!');
-    } else {
+    })
+    .catch(err => {
       console.error('ไม่สามารถส่งข้อความ:', err);
-    }
-  });
+    });
 }
 
 // ------------------------
@@ -393,18 +404,18 @@ function sendImageMessage(senderId, imageUrl) {
     },
   };
 
-  request({
-    uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
-    method: 'POST',
-    json: requestBody,
-  }, (err) => {
-    if (!err) {
+  // เปลี่ยน request → axios
+  axios.post(
+    'https://graph.facebook.com/v12.0/me/messages',
+    requestBody,
+    { params: { access_token: PAGE_ACCESS_TOKEN } }
+  )
+    .then(() => {
       console.log('รูปภาพถูกส่งสำเร็จ!');
-    } else {
+    })
+    .catch(err => {
       console.error('ไม่สามารถส่งรูปภาพ:', err);
-    }
-  });
+    });
 }
 
 // ------------------------
