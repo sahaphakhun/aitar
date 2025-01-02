@@ -1,12 +1,10 @@
 // ------------------------
 // server.js
 // ------------------------
-require('dotenv').config(); // โหลดตัวแปร environment
-
 const express = require('express');
 const bodyParser = require('body-parser');
-const axios = require('axios'); // ใช้ axios แทน request
-const { Configuration, OpenAIApi } = require('openai');
+const request = require('request');
+const { OpenAI } = require('openai');
 const { MongoClient } = require('mongodb');
 
 // สร้าง Express App
@@ -20,13 +18,13 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 
 // สร้าง OpenAI Instance
-const configuration = new Configuration({
+const openai = new OpenAI({
   apiKey: OPENAI_API_KEY, // ใช้ API key จาก Environment Variable
 });
-const openai = new OpenAIApi(configuration);
 
 /*
-  ใช้ global client ตัวเดียวสำหรับ MongoDB
+  แทนที่จะเปิด-ปิด MongoDB Client ในทุกฟังก์ชัน
+  เราจะใช้ global client ตัวเดียว
 */
 let mongoClient = null;
 async function connectDB() {
@@ -44,7 +42,7 @@ app.use(bodyParser.json());
 // ------------------------
 // System Instructions (แก้ไขให้พร้อมใช้งานกับแอปริคอตแห้ง)
 // ------------------------
-const systemInstructions = `
+const systemInstructions = '
 สวมบทบาทเป็นแอดมินสำหรับตอบคำถามและขายสินค้าในเพจ Facebook  
 โปรดใช้ภาษาที่สุภาพ หลีกเลี่ยงการตอบข้อความยาว ๆ หรือข้อความซ้ำซ้อนน่าเบื่อ ให้เจาะจงตอบเฉพาะที่ลูกค้าถาม
 หลีกเลี่ยงการใช้คำตอบที่นอกเหนือคำถามที่ลูกค้าถาม (ไม่ตอบสิ่งที่ลูกค้าไม่ได้พึ่งถาม)
@@ -182,7 +180,7 @@ const systemInstructions = `
 ────────────────────────────────────────
 - แจ้งเบอร์โทร จะมีแอดมินติดต่อกลับไป
 ────────────────────────────────────────
-`;
+';
 
 // ------------------------
 // Facebook Webhook Verify
@@ -205,27 +203,28 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   if (req.body.object === 'page') {
     for (const entry of req.body.entry) {
-      for (const webhookEvent of entry.messaging) { // ประมวลผลทุกข้อความ
-        const senderId = webhookEvent.sender.id;
+      const webhookEvent = entry.messaging[0];
+      const senderId = webhookEvent.sender.id;
 
-        if (webhookEvent.message && webhookEvent.message.text) {
-          const messageText = webhookEvent.message.text;
+      if (webhookEvent.message && webhookEvent.message.text) {
+        const messageText = webhookEvent.message.text;
+        const history = await getChatHistory(senderId);
+        const assistantResponse = await getAssistantResponse(history, messageText);
+        await saveChatHistory(senderId, messageText, assistantResponse);
+        sendTextMessage(senderId, assistantResponse);
+      }
+      else if (webhookEvent.message && webhookEvent.message.attachments) {
+        const attachments = webhookEvent.message.attachments;
+        const isImageFound = attachments.some(att => att.type === 'image');
+
+        if (isImageFound) {
+          const userMessage = "**ลูกค้าส่งรูปมา**";
           const history = await getChatHistory(senderId);
-          const assistantResponse = await getAssistantResponse(history, messageText);
-          await saveChatHistory(senderId, messageText, assistantResponse);
+          const assistantResponse = await getAssistantResponse(history, userMessage);
+          await saveChatHistory(senderId, userMessage, assistantResponse);
           sendTextMessage(senderId, assistantResponse);
-        }
-        else if (webhookEvent.message && webhookEvent.message.attachments) {
-          const attachments = webhookEvent.message.attachments;
-          const isImageFound = attachments.some(att => att.type === 'image');
-
-          let userMessage;
-          if (isImageFound) {
-            userMessage = "**ลูกค้าส่งรูปมา**";
-          } else {
-            userMessage = "**ลูกค้าส่งไฟล์แนบที่ไม่ใช่รูป**";
-          }
-
+        } else {
+          const userMessage = "**ลูกค้าส่งไฟล์แนบที่ไม่ใช่รูป**";
           const history = await getChatHistory(senderId);
           const assistantResponse = await getAssistantResponse(history, userMessage);
           await saveChatHistory(senderId, userMessage, assistantResponse);
@@ -240,6 +239,18 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ------------------------
+// ฟังก์ชัน: เชื่อมต่อ MongoDB (Global client)
+// ------------------------
+async function connectDB() {
+  if (!mongoClient) {
+    mongoClient = new MongoClient(MONGO_URI);
+    await mongoClient.connect();
+    console.log("MongoDB connected (global client).");
+  }
+  return mongoClient;
+}
+
+// ------------------------
 // ฟังก์ชัน: getChatHistory
 // ------------------------
 async function getChatHistory(senderId) {
@@ -248,9 +259,9 @@ async function getChatHistory(senderId) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).toArray();
+    const chats = await collection.find({ senderId }).toArray();
     return chats.map(chat => ({
-      role: chat.role, // 'user' หรือ 'assistant'
+      role: "user",
       content: chat.message,
     }));
   } catch (error) {
@@ -270,12 +281,11 @@ async function getAssistantResponse(history, message) {
       { role: "user", content: message },
     ];
 
-    const response = await openai.createChatCompletion({
-      model: "gpt-4o", // แก้ไขเป็น "gpt-4"
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // หรือ gpt-3.5-turbo ฯลฯ
       messages: messages,
     });
-
-    return response.data.choices[0].message.content;
+    return response.choices[0].message.content;
   } catch (error) {
     console.error("Error with ChatGPT Assistant:", error);
     return "เกิดข้อผิดพลาดในการเชื่อมต่อกับ Assistant";
@@ -285,25 +295,19 @@ async function getAssistantResponse(history, message) {
 // ------------------------
 // ฟังก์ชัน: saveChatHistory
 // ------------------------
-async function saveChatHistory(senderId, userMessage, assistantResponse) {
+async function saveChatHistory(senderId, message, response) {
   try {
     const client = await connectDB();
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    const userRecord = {
+    const chatRecord = {
       senderId,
-      role: "user",
-      message: userMessage,
+      message,
+      response,
       timestamp: new Date(),
     };
-    const assistantRecord = {
-      senderId,
-      role: "assistant",
-      message: assistantResponse,
-      timestamp: new Date(),
-    };
-    await collection.insertMany([userRecord, assistantRecord]);
+    await collection.insertOne(chatRecord);
     console.log("บันทึกประวัติการแชทสำเร็จ");
   } catch (error) {
     console.error("Error saving chat history:", error);
@@ -349,24 +353,30 @@ function sendTextMessage(senderId, response) {
 // ------------------------
 // ฟังก์ชัน: sendSimpleTextMessage
 // ------------------------
-async function sendSimpleTextMessage(senderId, text) {
+function sendSimpleTextMessage(senderId, text) {
   const requestBody = {
     recipient: { id: senderId },
     message: { text },
   };
 
-  try {
-    await axios.post(`https://graph.facebook.com/v12.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, requestBody);
-    console.log('ข้อความถูกส่งสำเร็จ!');
-  } catch (err) {
-    console.error('ไม่สามารถส่งข้อความ:', err);
-  }
+  request({
+    uri: 'https://graph.facebook.com/v12.0/me/messages',
+    qs: { access_token: PAGE_ACCESS_TOKEN },
+    method: 'POST',
+    json: requestBody,
+  }, (err) => {
+    if (!err) {
+      console.log('ข้อความถูกส่งสำเร็จ!');
+    } else {
+      console.error('ไม่สามารถส่งข้อความ:', err);
+    }
+  });
 }
 
 // ------------------------
 // ฟังก์ชัน: sendImageMessage
 // ------------------------
-async function sendImageMessage(senderId, imageUrl) {
+function sendImageMessage(senderId, imageUrl) {
   const requestBody = {
     recipient: { id: senderId },
     message: {
@@ -380,12 +390,18 @@ async function sendImageMessage(senderId, imageUrl) {
     },
   };
 
-  try {
-    await axios.post(`https://graph.facebook.com/v12.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, requestBody);
-    console.log('รูปภาพถูกส่งสำเร็จ!');
-  } catch (err) {
-    console.error('ไม่สามารถส่งรูปภาพ:', err);
-  }
+  request({
+    uri: 'https://graph.facebook.com/v12.0/me/messages',
+    qs: { access_token: PAGE_ACCESS_TOKEN },
+    method: 'POST',
+    json: requestBody,
+  }, (err) => {
+    if (!err) {
+      console.log('รูปภาพถูกส่งสำเร็จ!');
+    } else {
+      console.error('ไม่สามารถส่งรูปภาพ:', err);
+    }
+  });
 }
 
 // ------------------------
