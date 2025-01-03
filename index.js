@@ -1,5 +1,5 @@
 // ------------------------
-// index.js
+// index.js (ปรับปรุง)
 // ------------------------
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -25,9 +25,7 @@ const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
 const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 const GOOGLE_DOC_ID = process.env.GOOGLE_DOC_ID;
 
-// สร้าง OpenAI Instance
-
-
+// สร้าง OpenAI Instance (ใช้ model gpt-4 ตามเดิม ไม่เปลี่ยน)
 const configuration = new Configuration({
   apiKey: OPENAI_API_KEY,
 });
@@ -53,9 +51,9 @@ app.use(bodyParser.json());
 // ประกาศตัวแปรสำหรับเก็บคำสั่งจาก Google Docs
 let systemInstructions = "ยังไม่ได้โหลด systemInstructions จาก Google Docs...";
 
-/** 
+/**
  * ฟังก์ชันดึงข้อความทั้งหมดจาก Google Docs 
- * แล้วต่อรวมเป็นสตริงเดียว
+ * แล้วต่อรวมเป็นสตริงเดียว พร้อมทำความสะอาดข้อความ
  */
 async function fetchSystemInstructionsFromDoc() {
   try {
@@ -67,10 +65,9 @@ async function fetchSystemInstructionsFromDoc() {
 
     const docs = google.docs({ version: 'v1', auth });
     const res = await docs.documents.get({ documentId: GOOGLE_DOC_ID });
-
     const docContent = res.data.body?.content || [];
-    let fullText = '';
 
+    let fullText = '';
     docContent.forEach(block => {
       if (block.paragraph && block.paragraph.elements) {
         block.paragraph.elements.forEach(elem => {
@@ -81,11 +78,10 @@ async function fetchSystemInstructionsFromDoc() {
       }
     });
 
-    // ทำความสะอาดข้อความ เพื่อให้แน่ใจว่าเป็นข้อความเดียวและไม่มีโครงสร้าง JSON
+    // ทำความสะอาดข้อความ: ตัด \n หรือช่องว่างซ้ำ
     fullText = fullText.replace(/\n+/g, ' ').trim();
 
-    console.log("Fetched systemInstructions from Google Docs:", fullText); // ล็อกข้อความที่ดึงมา
-
+    console.log("Fetched systemInstructions from Google Docs:", fullText);
     return fullText;
   } catch (error) {
     console.error("Error fetching systemInstructions from Google Doc:", error);
@@ -102,10 +98,9 @@ app.get('/webhook', (req, res) => {
   const challenge = req.query['hub.challenge'];
 
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
+    return res.status(200).send(challenge);
   }
+  return res.sendStatus(403);
 });
 
 // ------------------------
@@ -118,32 +113,28 @@ app.post('/webhook', async (req, res) => {
       const senderId = webhookEvent.sender.id;
 
       if (webhookEvent.message && webhookEvent.message.text) {
+        // ผู้ใช้ส่งข้อความตัวอักษร
         const messageText = webhookEvent.message.text;
         const history = await getChatHistory(senderId);
         const assistantResponse = await getAssistantResponse(history, messageText);
         await saveChatHistory(senderId, messageText, assistantResponse);
         sendTextMessage(senderId, assistantResponse);
-      }
-      else if (webhookEvent.message && webhookEvent.message.attachments) {
+      } else if (webhookEvent.message && webhookEvent.message.attachments) {
+        // ผู้ใช้ส่งไฟล์แนบ
         const attachments = webhookEvent.message.attachments;
         const isImageFound = attachments.some(att => att.type === 'image');
 
+        let userMessage = "**ลูกค้าส่งไฟล์แนบที่ไม่ใช่รูป**";
         if (isImageFound) {
-          const userMessage = "**ลูกค้าส่งรูปมา**";
-          const history = await getChatHistory(senderId);
-          const assistantResponse = await getAssistantResponse(history, userMessage);
-          await saveChatHistory(senderId, userMessage, assistantResponse);
-          sendTextMessage(senderId, assistantResponse);
-        } else {
-          const userMessage = "**ลูกค้าส่งไฟล์แนบที่ไม่ใช่รูป**";
-          const history = await getChatHistory(senderId);
-          const assistantResponse = await getAssistantResponse(history, userMessage);
-          await saveChatHistory(senderId, userMessage, assistantResponse);
-          sendTextMessage(senderId, assistantResponse);
+          userMessage = "**ลูกค้าส่งรูปมา**";
         }
-      }
-      // กรณีอื่นๆ เช่น สติกเกอร์ที่ไม่มีข้อความ
-      else {
+
+        const history = await getChatHistory(senderId);
+        const assistantResponse = await getAssistantResponse(history, userMessage);
+        await saveChatHistory(senderId, userMessage, assistantResponse);
+        sendTextMessage(senderId, assistantResponse);
+      } else {
+        // กรณีอื่น ๆ เช่น สติกเกอร์ หรือไม่มี text/attachment
         const userMessage = "**ลูกค้าส่งข้อความพิเศษ (ไม่มี text/attachment)**";
         const history = await getChatHistory(senderId);
         const assistantResponse = await getAssistantResponse(history, userMessage);
@@ -151,10 +142,9 @@ app.post('/webhook', async (req, res) => {
         sendTextMessage(senderId, assistantResponse);
       }
     }
-    res.status(200).send('EVENT_RECEIVED');
-  } else {
-    res.sendStatus(404);
+    return res.status(200).send('EVENT_RECEIVED');
   }
+  return res.sendStatus(404);
 });
 
 // ------------------------
@@ -166,9 +156,16 @@ async function getChatHistory(senderId) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).limit(20).toArray(); // จำกัด 20 ข้อความล่าสุด
+    // ดึงข้อมูลบทสนทนา 20 ข้อความล่าสุด
+    const chats = await collection
+      .find({ senderId })
+      .sort({ timestamp: 1 })
+      .limit(20)
+      .toArray();
+
+    // กรองเฉพาะเอกสารที่มี role และ content ถูกต้อง
     return chats
-      .filter(chat => typeof chat.role === 'string' && typeof chat.content === 'string') // กรองข้อความที่มี role และ content
+      .filter(chat => typeof chat.role === 'string' && typeof chat.content === 'string')
       .map(chat => ({
         role: chat.role,
         content: chat.content,
@@ -184,58 +181,57 @@ async function getChatHistory(senderId) {
 // ------------------------
 async function getAssistantResponse(history, message) {
   try {
-    // กรณี message เป็น null หรือว่าง ให้ return ค่า fallback ไปเลย
+    // กรณี message เป็น null หรือว่าง => ตอบข้อความ fallback
     if (!message || !message.trim()) {
       return "สอบถามได้เลยนะครับ 😊";
     }
 
-    // กันพลาด systemInstructions เผื่อเป็น null
+    // กันพลาด systemInstructions เผื่อยังไม่ได้โหลดหรือเป็นค่าว่าง
     if (!systemInstructions) {
       systemInstructions = "systemInstructions default";
     }
 
+    // รวม message ทั้งหมด (System + ประวัติการสนทนา + user)
     const messages = [
       { role: "system", content: systemInstructions },
       ...history,
       { role: "user", content: message },
     ];
 
-    console.log("Messages array before filtering:", messages); // ล็อก messages ก่อนกรอง
+    console.log("Messages array before filtering:", messages);
 
-    // กรอง/เช็กอีกครั้ง ป้องกันพลาด
-    const safeMessages = messages.filter(
-      (msg, index) => {
-        if (!msg || typeof msg.role !== 'string' || typeof msg.content !== 'string') {
-          console.error(`Invalid message at index ${index}:`, msg);
-          return false;
-        }
-        return true;
+    // กรอง message ที่ไม่ถูกต้องออก (เช่น null, ไม่ใช่ string)
+    const safeMessages = messages.filter((msg, index) => {
+      if (!msg || typeof msg.role !== 'string' || typeof msg.content !== 'string') {
+        console.error(`Invalid message at index ${index}:`, msg);
+        return false;
       }
-    );
+      return true;
+    });
 
-    // เพิ่มการตรวจสอบว่ามี messages ที่ถูกกรองออกหรือไม่
     if (safeMessages.length !== messages.length) {
       console.warn("บาง messages ถูกกรองออกเนื่องจากไม่ถูกต้อง");
     }
-
-    console.log(`Total messages to send after filtering: ${safeMessages.length}`);
-
-    // ตรวจสอบว่ามี messages ที่ถูกต้องเพียงพอ
     if (safeMessages.length === 0) {
       return "ขออภัย ฉันไม่สามารถช่วยคุณได้ในขณะนี้";
     }
 
+    // เรียกใช้งาน OpenAI API (model gpt-4 ไม่เปลี่ยนแปลง)
     const response = await openai.createChatCompletion({
-      model: "gpt-4", // แก้ไขเป็น gpt-4 หรือ gpt-3.5-turbo ตามต้องการ
+      model: "gpt-4",
       messages: safeMessages,
     });
 
-    // ตรวจสอบว่ามีการตอบกลับจาก OpenAI
-    if (response && response.data && response.data.choices && response.data.choices.length > 0) {
+    // ตรวจสอบการตอบกลับ
+    if (
+      response &&
+      response.data &&
+      response.data.choices &&
+      response.data.choices.length > 0
+    ) {
       return response.data.choices[0].message.content.trim();
-    } else {
-      return "ขออภัย ฉันไม่สามารถให้คำตอบได้ในขณะนี้";
     }
+    return "ขออภัย ฉันไม่สามารถให้คำตอบได้ในขณะนี้";
   } catch (error) {
     console.error("Error with ChatGPT Assistant:", error);
     return "เกิดข้อผิดพลาดในการเชื่อมต่อกับ Assistant";
@@ -257,7 +253,6 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
       content: userMessage,
       timestamp: new Date(),
     };
-
     const assistantChatRecord = {
       senderId,
       role: "assistant",
@@ -265,9 +260,8 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
       timestamp: new Date(),
     };
 
-    // บันทึกข้อความของผู้ใช้
+    // บันทึกข้อมูลลงใน MongoDB
     await collection.insertOne(userChatRecord);
-    // บันทึกข้อความของผู้ช่วย
     await collection.insertOne(assistantChatRecord);
 
     console.log("บันทึกประวัติการแชทสำเร็จ");
@@ -280,15 +274,15 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
 // ฟังก์ชัน: sendTextMessage
 // ------------------------
 function sendTextMessage(senderId, response) {
-  // จับ 2 กรณี: [SEND_IMAGE_APRICOT:..] และ [SEND_IMAGE_PAYMENT:..]
+  // ตรวจสอบ pattern สำหรับส่งรูปภาพ
   const apricotRegex = /\[SEND_IMAGE_APRICOT:(https?:\/\/[^\s]+)\]/g;
   const paymentRegex = /\[SEND_IMAGE_PAYMENT:(https?:\/\/[^\s]+)\]/g;
 
-  // matchAll
+  // ค้นหา match ของคำสั่งส่งรูปภาพ
   const apricotMatches = [...response.matchAll(apricotRegex)];
   const paymentMatches = [...response.matchAll(paymentRegex)];
 
-  // ตัดคำสั่งออกจาก response
+  // ตัดคำสั่งออกจาก response ตัวสุดท้ายที่จะส่งเป็น text
   let textPart = response
     .replace(apricotRegex, '')
     .replace(paymentRegex, '')
@@ -305,7 +299,7 @@ function sendTextMessage(senderId, response) {
     sendImageMessage(senderId, imageUrl);
   });
 
-  // ส่งรูปช่องทางโอน
+  // ส่งรูปช่องทางการโอน
   paymentMatches.forEach(match => {
     const imageUrl = match[1];
     sendImageMessage(senderId, imageUrl);
@@ -321,18 +315,21 @@ function sendSimpleTextMessage(senderId, text) {
     message: { text },
   };
 
-  request({
-    uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
-    method: 'POST',
-    json: requestBody,
-  }, (err) => {
-    if (!err) {
-      console.log('ข้อความถูกส่งสำเร็จ!');
-    } else {
-      console.error('ไม่สามารถส่งข้อความ:', err);
+  request(
+    {
+      uri: 'https://graph.facebook.com/v12.0/me/messages',
+      qs: { access_token: PAGE_ACCESS_TOKEN },
+      method: 'POST',
+      json: requestBody,
+    },
+    (err) => {
+      if (!err) {
+        console.log('ข้อความถูกส่งสำเร็จ!');
+      } else {
+        console.error('ไม่สามารถส่งข้อความ:', err);
+      }
     }
-  });
+  );
 }
 
 // ------------------------
@@ -352,18 +349,21 @@ function sendImageMessage(senderId, imageUrl) {
     },
   };
 
-  request({
-    uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
-    method: 'POST',
-    json: requestBody,
-  }, (err) => {
-    if (!err) {
-      console.log('รูปภาพถูกส่งสำเร็จ!');
-    } else {
-      console.error('ไม่สามารถส่งรูปภาพ:', err);
+  request(
+    {
+      uri: 'https://graph.facebook.com/v12.0/me/messages',
+      qs: { access_token: PAGE_ACCESS_TOKEN },
+      method: 'POST',
+      json: requestBody,
+    },
+    (err) => {
+      if (!err) {
+        console.log('รูปภาพถูกส่งสำเร็จ!');
+      } else {
+        console.error('ไม่สามารถส่งรูปภาพ:', err);
+      }
     }
-  });
+  );
 }
 
 // ------------------------
@@ -371,6 +371,7 @@ function sendImageMessage(senderId, imageUrl) {
 // ------------------------
 app.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT}`);
+
   // เชื่อม MongoDB ตอน start server
   try {
     await connectDB();
@@ -387,7 +388,7 @@ app.listen(PORT, async () => {
     } else {
       console.log("ไม่พบข้อความใน Google Docs หรือโหลดไม่สำเร็จ (ใช้ข้อความเริ่มต้นแทน)");
     }
-    console.log("systemInstructions:", systemInstructions); // เพิ่มการล็อก
+    console.log("systemInstructions:", systemInstructions);
   } catch (error) {
     console.error("Error loading systemInstructions:", error);
   }
