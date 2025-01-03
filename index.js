@@ -4,7 +4,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
-const { OpenAI } = require('openai');
+const { Configuration, OpenAIApi } = require('openai'); // แก้ไขการ import OpenAI
 const { MongoClient } = require('mongodb');
 
 // ใช้ Google Docs API
@@ -26,9 +26,10 @@ const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g
 const GOOGLE_DOC_ID = process.env.GOOGLE_DOC_ID;
 
 // สร้าง OpenAI Instance
-const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY, // ใช้ API key จาก Environment Variable
+const configuration = new Configuration({
+  apiKey: OPENAI_API_KEY,
 });
+const openai = new OpenAIApi(configuration);
 
 /*
   แทนที่จะเปิด-ปิด MongoDB Client ในทุกฟังก์ชัน
@@ -78,7 +79,12 @@ async function fetchSystemInstructionsFromDoc() {
       }
     });
 
-    return fullText.trim();
+    // ทำความสะอาดข้อความ เพื่อให้แน่ใจว่าเป็นข้อความเดียวและไม่มีโครงสร้าง JSON
+    fullText = fullText.replace(/\n+/g, ' ').trim();
+
+    console.log("Fetched systemInstructions from Google Docs:", fullText); // ล็อกข้อความที่ดึงมา
+
+    return fullText;
   } catch (error) {
     console.error("Error fetching systemInstructions from Google Doc:", error);
     return "";
@@ -158,7 +164,7 @@ async function getChatHistory(senderId) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).toArray();
+    const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).limit(20).toArray(); // จำกัด 20 ข้อความล่าสุด
     return chats
       .filter(chat => typeof chat.role === 'string' && typeof chat.content === 'string') // กรองข้อความที่มี role และ content
       .map(chat => ({
@@ -192,7 +198,7 @@ async function getAssistantResponse(history, message) {
       { role: "user", content: message },
     ];
 
-    console.log("Messages array:", messages); // เพิ่มบรรทัดนี้
+    console.log("Messages array before filtering:", messages); // ล็อก messages ก่อนกรอง
 
     // กรอง/เช็กอีกครั้ง ป้องกันพลาด
     const safeMessages = messages.filter(
@@ -210,13 +216,24 @@ async function getAssistantResponse(history, message) {
       console.warn("บาง messages ถูกกรองออกเนื่องจากไม่ถูกต้อง");
     }
 
-    console.log(`Total messages to send: ${safeMessages.length}`);
+    console.log(`Total messages to send after filtering: ${safeMessages.length}`);
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o", // หรือ gpt-3.5-turbo, gpt-4, etc.
+    // ตรวจสอบว่ามี messages ที่ถูกต้องเพียงพอ
+    if (safeMessages.length === 0) {
+      return "ขออภัย ฉันไม่สามารถช่วยคุณได้ในขณะนี้";
+    }
+
+    const response = await openai.createChatCompletion({
+      model: "gpt-4", // แก้ไขเป็น gpt-4 หรือ gpt-3.5-turbo ตามต้องการ
       messages: safeMessages,
     });
-    return response.choices[0].message.content;
+
+    // ตรวจสอบว่ามีการตอบกลับจาก OpenAI
+    if (response && response.data && response.data.choices && response.data.choices.length > 0) {
+      return response.data.choices[0].message.content.trim();
+    } else {
+      return "ขออภัย ฉันไม่สามารถให้คำตอบได้ในขณะนี้";
+    }
   } catch (error) {
     console.error("Error with ChatGPT Assistant:", error);
     return "เกิดข้อผิดพลาดในการเชื่อมต่อกับ Assistant";
