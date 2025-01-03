@@ -190,7 +190,7 @@ async function getAssistantResponse(history, message) {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // หรือรุ่นที่ต้องการ
+      model: "gpt-4o-mini", // หรือรุ่นที่ต้องการ
       messages: messages,
     });
 
