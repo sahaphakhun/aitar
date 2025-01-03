@@ -186,9 +186,11 @@ async function getAssistantResponse(history, message) {
       { role: "user", content: message },
     ];
 
+    // ต้องมีการประกาศ openai แบบนี้
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o", // หรือรุ่นที่ต้องการ
       messages: messages,
     });
 
