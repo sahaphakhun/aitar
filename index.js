@@ -1,5 +1,5 @@
 // ------------------------
-// server.js (โค้ดที่ 2 เวอร์ชันอัปเดต)
+// index.js
 // ------------------------
 const express = require('express');
 const bodyParser = require('body-parser');
