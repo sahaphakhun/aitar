@@ -190,7 +190,7 @@ async function getAssistantResponse(history, message) {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // หรือรุ่นที่ต้องการ
+      model: "gpt-4o", // หรือรุ่นที่ต้องการ
       messages: messages,
     });
 
@@ -241,18 +241,13 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
 // ฟังก์ชัน: sendTextMessage
 // ------------------------
 function sendTextMessage(senderId, response) {
-  // จับ 2 กรณี: [SEND_IMAGE_APRICOT:..] และ [SEND_IMAGE_PAYMENT:..]
-  const apricotRegex = /\[SEND_IMAGE_APRICOT:(https?:\/\/[^\s]+)\]/g;
-  const paymentRegex = /\[SEND_IMAGE_PAYMENT:(https?:\/\/[^\s]+)\]/g;
+  const Simagex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
 
-  // matchAll
-  const apricotMatches = [...response.matchAll(apricotRegex)];
-  const paymentMatches = [...response.matchAll(paymentRegex)];
+  const Simage = [...response.matchAll(Simagex)];
 
   // ตัดคำสั่งออกจาก response
   let textPart = response
-    .replace(apricotRegex, '')
-    .replace(paymentRegex, '')
+    .replace(Simagex, '')
     .trim();
 
   // ส่งข้อความปกติ
@@ -261,13 +256,7 @@ function sendTextMessage(senderId, response) {
   }
 
   // ส่งรูปแอปริคอต
-  apricotMatches.forEach(match => {
-    const imageUrl = match[1];
-    sendImageMessage(senderId, imageUrl);
-  });
-
-  // ส่งรูปช่องทางโอน
-  paymentMatches.forEach(match => {
+  Simage.forEach(match => {
     const imageUrl = match[1];
     sendImageMessage(senderId, imageUrl);
   });
