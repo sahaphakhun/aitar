@@ -7,7 +7,7 @@ const request = require('request');
 const { OpenAI } = require('openai');
 const { MongoClient } = require('mongodb');
 
-// (เพิ่ม) ใช้ Google Docs API
+// ใช้ Google Docs API
 const { google } = require('googleapis');
 
 // สร้าง Express App
@@ -20,7 +20,7 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 
-// (เพิ่ม) ตัวแปรสำหรับ Google Docs
+// ตัวแปรสำหรับ Google Docs
 const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
 const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 const GOOGLE_DOC_ID = process.env.GOOGLE_DOC_ID;
@@ -47,13 +47,11 @@ async function connectDB() {
 // ใช้ bodyParser
 app.use(bodyParser.json());
 
-// (ลบ systemInstructions เก่าออก)
-
-// (เพิ่ม) ประกาศตัวแปรสำหรับเก็บคำสั่งจาก Google Docs
+// ประกาศตัวแปรสำหรับเก็บคำสั่งจาก Google Docs
 let systemInstructions = "ยังไม่ได้โหลด systemInstructions จาก Google Docs...";
 
 /** 
- * (เพิ่ม) ฟังก์ชันดึงข้อความทั้งหมดจาก Google Docs 
+ * ฟังก์ชันดึงข้อความทั้งหมดจาก Google Docs 
  * แล้วต่อรวมเป็นสตริงเดียว
  */
 async function fetchSystemInstructionsFromDoc() {
@@ -136,6 +134,14 @@ app.post('/webhook', async (req, res) => {
           sendTextMessage(senderId, assistantResponse);
         }
       }
+      // กรณีอื่นๆ เช่น สติกเกอร์ที่ไม่มีข้อความ
+      else {
+        const userMessage = "**ลูกค้าส่งข้อความพิเศษ (ไม่มี text/attachment)**";
+        const history = await getChatHistory(senderId);
+        const assistantResponse = await getAssistantResponse(history, userMessage);
+        await saveChatHistory(senderId, userMessage, assistantResponse);
+        sendTextMessage(senderId, assistantResponse);
+      }
     }
     res.status(200).send('EVENT_RECEIVED');
   } else {
@@ -153,10 +159,12 @@ async function getChatHistory(senderId) {
     const collection = db.collection("chat_history");
 
     const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).toArray();
-    return chats.map(chat => ({
-      role: chat.role,       
-      content: chat.content, 
-    }));
+    return chats
+      .filter(chat => typeof chat.role === 'string' && typeof chat.content === 'string') // กรองข้อความที่มี role และ content
+      .map(chat => ({
+        role: chat.role,
+        content: chat.content,
+      }));
   } catch (error) {
     console.error("Error fetching chat history:", error);
     return [];
@@ -168,15 +176,45 @@ async function getChatHistory(senderId) {
 // ------------------------
 async function getAssistantResponse(history, message) {
   try {
+    // กรณี message เป็น null หรือว่าง ให้ return ค่า fallback ไปเลย
+    if (!message || !message.trim()) {
+      return "สอบถามได้เลยนะครับ 😊";
+    }
+
+    // กันพลาด systemInstructions เผื่อเป็น null
+    if (!systemInstructions) {
+      systemInstructions = "systemInstructions default";
+    }
+
     const messages = [
       { role: "system", content: systemInstructions },
       ...history,
       { role: "user", content: message },
     ];
 
+    console.log("Messages array:", messages); // เพิ่มบรรทัดนี้
+
+    // กรอง/เช็กอีกครั้ง ป้องกันพลาด
+    const safeMessages = messages.filter(
+      (msg, index) => {
+        if (!msg || typeof msg.role !== 'string' || typeof msg.content !== 'string') {
+          console.error(`Invalid message at index ${index}:`, msg);
+          return false;
+        }
+        return true;
+      }
+    );
+
+    // เพิ่มการตรวจสอบว่ามี messages ที่ถูกกรองออกหรือไม่
+    if (safeMessages.length !== messages.length) {
+      console.warn("บาง messages ถูกกรองออกเนื่องจากไม่ถูกต้อง");
+    }
+
+    console.log(`Total messages to send: ${safeMessages.length}`);
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o", // หรือ gpt-3.5-turbo, gpt-4, etc.
-      messages: messages,
+      messages: safeMessages,
     });
     return response.choices[0].message.content;
   } catch (error) {
@@ -321,7 +359,7 @@ app.listen(PORT, async () => {
     console.error("MongoDB connect error at startup:", err);
   }
 
-  // (เพิ่ม) โหลดคำสั่งจาก Google Docs
+  // โหลดคำสั่งจาก Google Docs
   try {
     const docText = await fetchSystemInstructionsFromDoc();
     if (docText) {
@@ -330,6 +368,7 @@ app.listen(PORT, async () => {
     } else {
       console.log("ไม่พบข้อความใน Google Docs หรือโหลดไม่สำเร็จ (ใช้ข้อความเริ่มต้นแทน)");
     }
+    console.log("systemInstructions:", systemInstructions); // เพิ่มการล็อก
   } catch (error) {
     console.error("Error loading systemInstructions:", error);
   }
