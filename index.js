@@ -4,6 +4,8 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
+const { OpenAI } = require('openai');
+
 
 // === เพิ่มเติมส่วน Google APIs สำหรับดึงข้อมูลจาก Docs ===
 const { google } = require('googleapis');
