@@ -4,7 +4,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
-const { Configuration, OpenAIApi } = require('openai'); // แก้ไขการ import OpenAI
+const { Configuration, OpenAIApi } = require('openai');
 const { MongoClient } = require('mongodb');
 
 // ใช้ Google Docs API
@@ -26,6 +26,8 @@ const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g
 const GOOGLE_DOC_ID = process.env.GOOGLE_DOC_ID;
 
 // สร้าง OpenAI Instance
+
+
 const configuration = new Configuration({
   apiKey: OPENAI_API_KEY,
 });
