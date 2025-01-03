@@ -7,34 +7,32 @@ const request = require('request');
 const { OpenAI } = require('openai');
 const { MongoClient } = require('mongodb');
 
-// เพิ่มมาเพื่อใช้ Google Docs API
+// (เพิ่ม) ใช้ Google Docs API
 const { google } = require('googleapis');
 
-// เรียกใช้งาน Environment Variables
+// สร้าง Express App
+const app = express();
 const PORT = process.env.PORT || 3000;
+
+// ตัวแปร Environment
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "XianTA1234";
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 
-// ส่วนที่เกี่ยวกับ Google Docs
+// (เพิ่ม) ตัวแปรสำหรับ Google Docs
 const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
 const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 const GOOGLE_DOC_ID = process.env.GOOGLE_DOC_ID;
 
-// สร้าง Express App
-const app = express();
-
-// ใช้ bodyParser
-app.use(bodyParser.json());
-
 // สร้าง OpenAI Instance
 const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
+  apiKey: OPENAI_API_KEY, // ใช้ API key จาก Environment Variable
 });
 
 /*
-  Global MongoDB Client
+  แทนที่จะเปิด-ปิด MongoDB Client ในทุกฟังก์ชัน
+  เราจะใช้ global client ตัวเดียว
 */
 let mongoClient = null;
 async function connectDB() {
@@ -46,18 +44,20 @@ async function connectDB() {
   return mongoClient;
 }
 
-// ------------------------
-// ตัวแปรสำหรับเก็บ systemInstructions
-// ------------------------
-let systemInstructions = "ยังไม่ได้โหลด systemInstructions จาก Google Docs ...";
+// ใช้ bodyParser
+app.use(bodyParser.json());
 
-/**
- * ฟังก์ชันสำหรับอ่านข้อความจาก Google Docs
- * (ดึงทุก Text Element ต่อเป็นข้อความเดียว)
+// (ลบ systemInstructions เก่าออกทั้งหมด)
+
+// (เพิ่ม) ประกาศตัวแปรสำหรับเก็บคำสั่งจาก Google Docs
+let systemInstructions = "ยังไม่ได้โหลด systemInstructions จาก Google Docs...";
+
+/** 
+ * (เพิ่ม) ฟังก์ชันดึงข้อความทั้งหมดจาก Google Docs 
+ * แล้วต่อรวมเป็นสตริงเดียว
  */
-async function fetchTextFromGoogleDoc() {
+async function fetchSystemInstructionsFromDoc() {
   try {
-    // Auth ด้วย Service Account (JWT)
     const auth = new google.auth.JWT({
       email: GOOGLE_CLIENT_EMAIL,
       key: GOOGLE_PRIVATE_KEY,
@@ -65,18 +65,14 @@ async function fetchTextFromGoogleDoc() {
     });
 
     const docs = google.docs({ version: 'v1', auth });
-
-    // เรียกดูข้อมูลเอกสาร
-    const res = await docs.documents.get({
-      documentId: GOOGLE_DOC_ID,
-    });
+    const res = await docs.documents.get({ documentId: GOOGLE_DOC_ID });
 
     const docContent = res.data.body?.content || [];
     let fullText = '';
 
-    docContent.forEach((struct) => {
-      if (struct.paragraph && struct.paragraph.elements) {
-        struct.paragraph.elements.forEach((elem) => {
+    docContent.forEach(block => {
+      if (block.paragraph && block.paragraph.elements) {
+        block.paragraph.elements.forEach(elem => {
           if (elem.textRun && elem.textRun.content) {
             fullText += elem.textRun.content;
           }
@@ -86,27 +82,8 @@ async function fetchTextFromGoogleDoc() {
 
     return fullText.trim();
   } catch (error) {
-    console.error('Error fetching text from Google Doc:', error);
-    return '';
-  }
-}
-
-/**
- * ฟังก์ชันสำหรับโหลด systemInstructions จาก Google Docs
- */
-async function loadSystemInstructions() {
-  try {
-    const text = await fetchTextFromGoogleDoc();
-    if (text) {
-      systemInstructions = text;
-      console.log("Loaded systemInstructions from Google Docs สำเร็จ!");
-    } else {
-      console.log("ไม่พบข้อความใน Google Docs หรือโหลดไม่สำเร็จ");
-      systemInstructions = "systemInstructions Default (กรณีอ่าน Google Docs ไม่ได้)";
-    }
-  } catch (error) {
-    console.error("Error loading systemInstructions:", error);
-    systemInstructions = "systemInstructions Default (เกิด error ระหว่างโหลด)";
+    console.error("Error fetching systemInstructions from Google Doc:", error);
+    return "";
   }
 }
 
@@ -134,16 +111,14 @@ app.post('/webhook', async (req, res) => {
       const webhookEvent = entry.messaging[0];
       const senderId = webhookEvent.sender.id;
 
-      // 1) กรณีมีข้อความตัวอักษร
       if (webhookEvent.message && webhookEvent.message.text) {
         const messageText = webhookEvent.message.text;
         const history = await getChatHistory(senderId);
         const assistantResponse = await getAssistantResponse(history, messageText);
         await saveChatHistory(senderId, messageText, assistantResponse);
         sendTextMessage(senderId, assistantResponse);
-
-      // 2) กรณีมีไฟล์แนบ (รูปภาพหรืออื่น ๆ)
-      } else if (webhookEvent.message && webhookEvent.message.attachments) {
+      }
+      else if (webhookEvent.message && webhookEvent.message.attachments) {
         const attachments = webhookEvent.message.attachments;
         const isImageFound = attachments.some(att => att.type === 'image');
 
@@ -160,14 +135,6 @@ app.post('/webhook', async (req, res) => {
           await saveChatHistory(senderId, userMessage, assistantResponse);
           sendTextMessage(senderId, assistantResponse);
         }
-
-      // 3) กรณีข้อความอื่นๆ (เช่น สติกเกอร์, Reaction) ที่ไม่มี message.text / attachment
-      } else {
-        const userMessage = "**ลูกค้าส่งข้อความพิเศษ (ไม่มี text/attachment)**";
-        const history = await getChatHistory(senderId);
-        const assistantResponse = await getAssistantResponse(history, userMessage);
-        await saveChatHistory(senderId, userMessage, assistantResponse);
-        sendTextMessage(senderId, assistantResponse);
       }
     }
     res.status(200).send('EVENT_RECEIVED');
@@ -186,13 +153,10 @@ async function getChatHistory(senderId) {
     const collection = db.collection("chat_history");
 
     const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).toArray();
-    // ตัด record ที่ content เป็น null/undefined ออก ถ้าเผื่อกรณีเก็บมาได้ไม่สมบูรณ์
-    return chats
-      .filter(chat => typeof chat.content === 'string')
-      .map(chat => ({
-        role: chat.role,
-        content: chat.content,
-      }));
+    return chats.map(chat => ({
+      role: chat.role,       
+      content: chat.content, 
+    }));
   } catch (error) {
     console.error("Error fetching chat history:", error);
     return [];
@@ -204,28 +168,16 @@ async function getChatHistory(senderId) {
 // ------------------------
 async function getAssistantResponse(history, message) {
   try {
-    // กรณี message เป็น null หรือว่าง ให้ return ค่า fallback ไปเลย
-    if (!message || !message.trim()) {
-      return "สอบถามได้เลยนะครับ 😊";
-    }
-
-    // กันพลาด systemInstructions เผื่อเป็น null
-    if (!systemInstructions) {
-      systemInstructions = "systemInstructions default";
-    }
-
     const messages = [
       { role: "system", content: systemInstructions },
       ...history,
       { role: "user", content: message },
     ];
 
-    // เรียก OpenAI
     const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo", // หรือ gpt-4 / gpt-4o ตามต้องการ
+      model: "gpt-4o", // หรือ gpt-3.5-turbo ฯลฯ
       messages: messages,
     });
-
     return response.choices[0].message.content;
   } catch (error) {
     console.error("Error with ChatGPT Assistant:", error);
@@ -242,22 +194,23 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
-    // บันทึก user message
     const userChatRecord = {
       senderId,
       role: "user",
       content: userMessage,
       timestamp: new Date(),
     };
-    await collection.insertOne(userChatRecord);
 
-    // บันทึก assistant response
     const assistantChatRecord = {
       senderId,
       role: "assistant",
       content: assistantResponse,
       timestamp: new Date(),
     };
+
+    // บันทึกข้อความของผู้ใช้
+    await collection.insertOne(userChatRecord);
+    // บันทึกข้อความของผู้ช่วย
     await collection.insertOne(assistantChatRecord);
 
     console.log("บันทึกประวัติการแชทสำเร็จ");
@@ -270,13 +223,15 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
 // ฟังก์ชัน: sendTextMessage
 // ------------------------
 function sendTextMessage(senderId, response) {
-  // จัดการกรณีส่งรูป (แท็ก [SEND_IMAGE_APRICOT:URL] หรือ [SEND_IMAGE_PAYMENT:URL]) 
+  // จับ 2 กรณี: [SEND_IMAGE_APRICOT:..] และ [SEND_IMAGE_PAYMENT:..]
   const apricotRegex = /\[SEND_IMAGE_APRICOT:(https?:\/\/[^\s]+)\]/g;
   const paymentRegex = /\[SEND_IMAGE_PAYMENT:(https?:\/\/[^\s]+)\]/g;
 
+  // matchAll
   const apricotMatches = [...response.matchAll(apricotRegex)];
   const paymentMatches = [...response.matchAll(paymentRegex)];
 
+  // ตัดคำสั่งออกจาก response
   let textPart = response
     .replace(apricotRegex, '')
     .replace(paymentRegex, '')
@@ -310,7 +265,7 @@ function sendSimpleTextMessage(senderId, text) {
   };
 
   request({
-    uri: 'https://graph.facebook.com/v16.0/me/messages', // อาจเปลี่ยนเวอร์ชันตามต้องการ
+    uri: 'https://graph.facebook.com/v12.0/me/messages',
     qs: { access_token: PAGE_ACCESS_TOKEN },
     method: 'POST',
     json: requestBody,
@@ -341,7 +296,7 @@ function sendImageMessage(senderId, imageUrl) {
   };
 
   request({
-    uri: 'https://graph.facebook.com/v16.0/me/messages', // อาจเปลี่ยนเวอร์ชันตามต้องการ
+    uri: 'https://graph.facebook.com/v12.0/me/messages',
     qs: { access_token: PAGE_ACCESS_TOKEN },
     method: 'POST',
     json: requestBody,
@@ -355,18 +310,27 @@ function sendImageMessage(senderId, imageUrl) {
 }
 
 // ------------------------
-// เริ่มต้น Start Server
+// Start Server
 // ------------------------
 app.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT}`);
-
-  // 1) เชื่อม MongoDB ตอน start server
+  // เชื่อม MongoDB ตอน start server
   try {
     await connectDB();
   } catch (err) {
     console.error("MongoDB connect error at startup:", err);
   }
 
-  // 2) โหลด systemInstructions จาก Google Docs
-  await loadSystemInstructions();
+  // (เพิ่ม) โหลดคำสั่งจาก Google Docs
+  try {
+    const docText = await fetchSystemInstructionsFromDoc();
+    if (docText) {
+      systemInstructions = docText;
+      console.log("systemInstructions loaded from Google Docs เรียบร้อย");
+    } else {
+      console.log("ไม่พบข้อความใน Google Docs หรือโหลดไม่สำเร็จ (ใช้ข้อความเริ่มต้นแทน)");
+    }
+  } catch (error) {
+    console.error("Error loading systemInstructions:", error);
+  }
 });
