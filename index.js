@@ -25,7 +25,7 @@ const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
 const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 const GOOGLE_DOC_ID = process.env.GOOGLE_DOC_ID;
 
-// สร้าง OpenAI Instance (ใช้ model gpt-4 ตามเดิม ไม่เปลี่ยน)
+// สร้าง OpenAI Instance (model: gpt-4o ตามที่ต้องการ)
 const configuration = new Configuration({
   apiKey: OPENAI_API_KEY,
 });
@@ -216,9 +216,9 @@ async function getAssistantResponse(history, message) {
       return "ขออภัย ฉันไม่สามารถช่วยคุณได้ในขณะนี้";
     }
 
-    // เรียกใช้งาน OpenAI API (model gpt-4 ไม่เปลี่ยนแปลง)
+    // เรียกใช้งาน OpenAI API (model gpt-4o ตามที่ต้องการ)
     const response = await openai.createChatCompletion({
-      model: "gpt-4",
+      model: "gpt-4o",
       messages: safeMessages,
     });
 
