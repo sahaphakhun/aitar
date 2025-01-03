@@ -47,7 +47,7 @@ async function connectDB() {
 // ใช้ bodyParser
 app.use(bodyParser.json());
 
-// (ลบ systemInstructions เก่าออกทั้งหมด)
+// (ลบ systemInstructions เก่าออก)
 
 // (เพิ่ม) ประกาศตัวแปรสำหรับเก็บคำสั่งจาก Google Docs
 let systemInstructions = "ยังไม่ได้โหลด systemInstructions จาก Google Docs...";
@@ -175,7 +175,7 @@ async function getAssistantResponse(history, message) {
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // หรือ gpt-3.5-turbo ฯลฯ
+      model: "gpt-4o", // หรือ gpt-3.5-turbo, gpt-4, etc.
       messages: messages,
     });
     return response.choices[0].message.content;
