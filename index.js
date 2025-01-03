@@ -178,24 +178,26 @@ async function getChatHistory(senderId) {
 // ------------------------
 async function getAssistantResponse(history, message) {
   try {
-    // ใช้ systemInstructions จาก Google Docs ที่เราโหลดมา
     const messages = [
       { role: "system", content: systemInstructions },
       ...history,
       { role: "user", content: message },
     ];
 
-    // ใส่โมดูล openai ตัวจริงตามที่ต้องการ เช่น  const { OpenAI } = require('openai');
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // หรือ gpt-3.5-turbo, ...
+      model: "gpt-4o",
       messages: messages,
     });
+
     return response.choices[0].message.content;
 
-
+  } catch (error) {
+    console.error("Error with ChatGPT Assistant:", error);
+    return "เกิดข้อผิดพลาดในการเชื่อมต่อกับ Assistant";
+  }
 }
+
 
 // ------------------------
 // ฟังก์ชัน: saveChatHistory
