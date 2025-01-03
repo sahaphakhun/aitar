@@ -102,9 +102,11 @@ async function loadSystemInstructions() {
       console.log("Loaded systemInstructions from Google Docs สำเร็จ!");
     } else {
       console.log("ไม่พบข้อความใน Google Docs หรือโหลดไม่สำเร็จ");
+      systemInstructions = "systemInstructions Default (กรณีอ่าน Google Docs ไม่ได้)";
     }
   } catch (error) {
     console.error("Error loading systemInstructions:", error);
+    systemInstructions = "systemInstructions Default (เกิด error ระหว่างโหลด)";
   }
 }
 
@@ -132,6 +134,7 @@ app.post('/webhook', async (req, res) => {
       const webhookEvent = entry.messaging[0];
       const senderId = webhookEvent.sender.id;
 
+      // 1) กรณีมีข้อความตัวอักษร
       if (webhookEvent.message && webhookEvent.message.text) {
         const messageText = webhookEvent.message.text;
         const history = await getChatHistory(senderId);
@@ -139,6 +142,7 @@ app.post('/webhook', async (req, res) => {
         await saveChatHistory(senderId, messageText, assistantResponse);
         sendTextMessage(senderId, assistantResponse);
 
+      // 2) กรณีมีไฟล์แนบ (รูปภาพหรืออื่น ๆ)
       } else if (webhookEvent.message && webhookEvent.message.attachments) {
         const attachments = webhookEvent.message.attachments;
         const isImageFound = attachments.some(att => att.type === 'image');
@@ -156,6 +160,14 @@ app.post('/webhook', async (req, res) => {
           await saveChatHistory(senderId, userMessage, assistantResponse);
           sendTextMessage(senderId, assistantResponse);
         }
+
+      // 3) กรณีข้อความอื่นๆ (เช่น สติกเกอร์, Reaction) ที่ไม่มี message.text / attachment
+      } else {
+        const userMessage = "**ลูกค้าส่งข้อความพิเศษ (ไม่มี text/attachment)**";
+        const history = await getChatHistory(senderId);
+        const assistantResponse = await getAssistantResponse(history, userMessage);
+        await saveChatHistory(senderId, userMessage, assistantResponse);
+        sendTextMessage(senderId, assistantResponse);
       }
     }
     res.status(200).send('EVENT_RECEIVED');
@@ -174,10 +186,13 @@ async function getChatHistory(senderId) {
     const collection = db.collection("chat_history");
 
     const chats = await collection.find({ senderId }).sort({ timestamp: 1 }).toArray();
-    return chats.map(chat => ({
-      role: chat.role,
-      content: chat.content,
-    }));
+    // ตัด record ที่ content เป็น null/undefined ออก ถ้าเผื่อกรณีเก็บมาได้ไม่สมบูรณ์
+    return chats
+      .filter(chat => typeof chat.content === 'string')
+      .map(chat => ({
+        role: chat.role,
+        content: chat.content,
+      }));
   } catch (error) {
     console.error("Error fetching chat history:", error);
     return [];
@@ -189,7 +204,16 @@ async function getChatHistory(senderId) {
 // ------------------------
 async function getAssistantResponse(history, message) {
   try {
-    // รวม systemInstructions และประวัติการสนทนา
+    // กรณี message เป็น null หรือว่าง ให้ return ค่า fallback ไปเลย
+    if (!message || !message.trim()) {
+      return "สอบถามได้เลยนะครับ 😊";
+    }
+
+    // กันพลาด systemInstructions เผื่อเป็น null
+    if (!systemInstructions) {
+      systemInstructions = "systemInstructions default";
+    }
+
     const messages = [
       { role: "system", content: systemInstructions },
       ...history,
@@ -198,7 +222,7 @@ async function getAssistantResponse(history, message) {
 
     // เรียก OpenAI
     const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo", // หรือ gpt-4 / gpt-4o ฯลฯ
+      model: "gpt-3.5-turbo", // หรือ gpt-4 / gpt-4o ตามต้องการ
       messages: messages,
     });
 
@@ -218,21 +242,22 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
     const db = client.db("chatbot");
     const collection = db.collection("chat_history");
 
+    // บันทึก user message
     const userChatRecord = {
       senderId,
       role: "user",
       content: userMessage,
       timestamp: new Date(),
     };
+    await collection.insertOne(userChatRecord);
 
+    // บันทึก assistant response
     const assistantChatRecord = {
       senderId,
       role: "assistant",
       content: assistantResponse,
       timestamp: new Date(),
     };
-
-    await collection.insertOne(userChatRecord);
     await collection.insertOne(assistantChatRecord);
 
     console.log("บันทึกประวัติการแชทสำเร็จ");
@@ -245,6 +270,7 @@ async function saveChatHistory(senderId, userMessage, assistantResponse) {
 // ฟังก์ชัน: sendTextMessage
 // ------------------------
 function sendTextMessage(senderId, response) {
+  // จัดการกรณีส่งรูป (แท็ก [SEND_IMAGE_APRICOT:URL] หรือ [SEND_IMAGE_PAYMENT:URL]) 
   const apricotRegex = /\[SEND_IMAGE_APRICOT:(https?:\/\/[^\s]+)\]/g;
   const paymentRegex = /\[SEND_IMAGE_PAYMENT:(https?:\/\/[^\s]+)\]/g;
 
@@ -284,7 +310,7 @@ function sendSimpleTextMessage(senderId, text) {
   };
 
   request({
-    uri: 'https://graph.facebook.com/v12.0/me/messages',
+    uri: 'https://graph.facebook.com/v16.0/me/messages', // อาจเปลี่ยนเวอร์ชันตามต้องการ
     qs: { access_token: PAGE_ACCESS_TOKEN },
     method: 'POST',
     json: requestBody,
@@ -315,7 +341,7 @@ function sendImageMessage(senderId, imageUrl) {
   };
 
   request({
-    uri: 'https://graph.facebook.com/v12.0/me/messages',
+    uri: 'https://graph.facebook.com/v16.0/me/messages', // อาจเปลี่ยนเวอร์ชันตามต้องการ
     qs: { access_token: PAGE_ACCESS_TOKEN },
     method: 'POST',
     json: requestBody,
