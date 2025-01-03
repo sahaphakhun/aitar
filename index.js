@@ -186,20 +186,15 @@ async function getAssistantResponse(history, message) {
     ];
 
     // ใส่โมดูล openai ตัวจริงตามที่ต้องการ เช่น  const { OpenAI } = require('openai');
-//    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-//
-//    const response = await openai.chat.completions.create({
-//      model: "gpt-4o", // หรือ gpt-3.5-turbo, ...
-//      messages: messages,
-//    });
-//    return response.choices[0].message.content;
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-    // **ตัวอย่างการตอบกลับแบบ mock** (เผื่อทดสอบไม่มี OpenAI)
-    return "นี่คือข้อความ Mock จากระบบ AI เนื่องจากไม่ได้ผูก OpenAI จริง";
-  } catch (error) {
-    console.error("Error with ChatGPT Assistant:", error);
-    return "เกิดข้อผิดพลาดในการเชื่อมต่อกับ Assistant";
-  }
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // หรือ gpt-3.5-turbo, ...
+      messages: messages,
+    });
+    return response.choices[0].message.content;
+
+
 }
 
 // ------------------------
