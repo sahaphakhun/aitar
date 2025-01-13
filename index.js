@@ -226,9 +226,9 @@ async function getAssistantResponse(systemInstructions, history, userMessage) {
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages,
-      temperature: 0.2,
+      temperature: 0.4,
     });
 
     const assistantReply = response.choices[0].message.content.trim();
